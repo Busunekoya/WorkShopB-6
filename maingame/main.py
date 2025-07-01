@@ -1,8 +1,24 @@
+#https://www.mikan-tech.net/entry/raspi-speaker 音声を流す参考URL
+
 from flask import Flask, render_template, Response, request, send_from_directory
 import os
 import cv2
 from camera import VideoCamera
 import imutils
+from pydub import AudioSegment
+from pydub.playback import play
+
+#音性を流す
+sound = AudioSegment.from_mp3("hoge.mp3")
+play(sound)
+
+player_num = int(input("プレイヤーの人数を入力してください"))
+print(player_num)
+
+boolplayer = []
+
+for i in range(player_num):
+    boolplayer.append(0)
 
 # Globals (do not edit)
 pi_camera = VideoCamera() 
