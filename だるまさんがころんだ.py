@@ -23,3 +23,12 @@ for i in range(player_num):
     boolplayer.append(0)
 
 print(boolplayer)
+
+outplayer = []
+outplayer.append(0)
+
+for i in outplayer:
+
+    boolplayer[i] = 1
+
+print(boolplayer)
