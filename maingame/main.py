@@ -7,6 +7,7 @@ from camera import VideoCamera
 import imutils
 from pydub import AudioSegment
 from pydub.playback import play
+import time
 
 #音性を流す
 sound = AudioSegment.from_mp3("hoge.mp3")
@@ -25,21 +26,23 @@ pi_camera = VideoCamera()
 app = Flask(__name__)
 cascade = cv2.CascadeClassifier("/home/aj/fd/haarcascade_frontalface_alt2.xml")
 
+motion_detected_frames = 0
+motion_detected_threshold = 3
+
 @app.route('/')
 def index():
     return render_template('index.html') #you can customze index.html here
 
-def gen(camera):
+def gen(camera,num):
     frame_count = 0
     consecutive_frame = 4
-    num=0
     while True:
         if num==0:
             print('基準画像設定')
             background = camera.get_frame()
             # convert the background model to grayscale format
             background = cv2.cvtColor(background, cv2.COLOR_BGR2GRAY)
-        num=(num+1)%100
+        #num=(num+1)%100
       
         frame = camera.get_frame()
         frame_count += 1
@@ -77,6 +80,11 @@ def gen(camera):
                 # ... helps in removing noise detection
 
                 if cv2.contourArea(contour) >  1500:
+                    motion_detected_frames += 1
+                else:
+                    motion_detected_frames = 0
+
+                if motion_detected_frames >= motion_detected_threshold:
                   # get the xmin, ymin, width, and height coordinates from the contours
                     (x, y, w, h) = cv2.boundingRect(contour)
                     # 動体検出領域を切り出す
@@ -86,12 +94,7 @@ def gen(camera):
                     roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
 
                     # 顔検出
-                    faces = cascade.detectMultiScale(
-                        roi_gray,
-                        scaleFactor=1.1,
-                        minNeighbors=3,
-                        minSize=(30, 30)
-                    )
+                    faces = cascade.detectMultiScale(roi_gray,scaleFactor=1.1,minNeighbors=3,minSize=(30, 30))
 
                     if len(faces) > 0:
                         print("人間を検知！")
@@ -99,8 +102,7 @@ def gen(camera):
                     # ROI内の顔矩形を元の座標系に変換して描画
                         for (fx, fy, fw, fh) in faces:
                             # ROI内座標 → 全体座標へ
-                            cv2.rectangle(
-                                orig_frame,
+                            cv2.rectangle(orig_frame,
                                 (x + fx, y + fy),
                                 (x + fx + fw, y + fy + fh),
                                 (0, 0, 255),
@@ -120,8 +122,7 @@ def gen(camera):
         
 @app.route('/video_feed')
 def video_feed():
-    return Response(gen(pi_camera),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(gen(pi_camera,0),mimetype='multipart/x-mixed-replace; boundary=frame')
 
 if __name__ == '__main__':
 
