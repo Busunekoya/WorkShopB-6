@@ -1,5 +1,5 @@
 #https://www.mikan-tech.net/entry/raspi-speaker 音声を流す参考URL
-
+#md.pyが元になっている
 from flask import Flask, render_template, Response, request, send_from_directory
 import os
 import cv2
@@ -23,7 +23,7 @@ for i in range(player_num):
 # Globals (do not edit)
 pi_camera = VideoCamera() 
 app = Flask(__name__)
-
+cascade = cv2.CascadeClassifier("/home/aj/fd/haarcascade_frontalface_alt2.xml")
 
 @app.route('/')
 def index():
@@ -78,10 +78,37 @@ def gen(camera):
 
                 if cv2.contourArea(contour) >  1500:
                   # get the xmin, ymin, width, and height coordinates from the contours
-                  (x, y, w, h) = cv2.boundingRect(contour)
+                    (x, y, w, h) = cv2.boundingRect(contour)
+                    # 動体検出領域を切り出す
+                    roi = orig_frame[y:y+h, x:x+w]
+
+                    # グレースケールに変換
+                    roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+
+                    # 顔検出
+                    faces = cascade.detectMultiScale(
+                        roi_gray,
+                        scaleFactor=1.1,
+                        minNeighbors=3,
+                        minSize=(30, 30)
+                    )
+
+                    if len(faces) > 0:
+                        print("人間を検知！")
+
+                    # ROI内の顔矩形を元の座標系に変換して描画
+                        for (fx, fy, fw, fh) in faces:
+                            # ROI内座標 → 全体座標へ
+                            cv2.rectangle(
+                                orig_frame,
+                                (x + fx, y + fy),
+                                (x + fx + fw, y + fy + fh),
+                                (0, 0, 255),
+                                2
+                            )
                   # draw the bounding boxes
                   #cv2.rectangle(frame_diff, (x, y), (x+w, y+h), (255, 255, 255), 2)
-                  cv2.rectangle(orig_frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                    cv2.rectangle(orig_frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
         
             #cv2.imshow('Detected Objects', frame_diff)
             #cv2.imshow('Detected Objects', sum_frames)
