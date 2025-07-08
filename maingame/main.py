@@ -5,15 +5,19 @@ import os
 import cv2
 from camera import VideoCamera
 import imutils
-from pydub import AudioSegment
-from pydub.playback import play
+#from pydub import AudioSegment
+#from pydub.playback import play
 import time
+import threading
+import random
 
 #音性を流す
+"""
 sound = AudioSegment.from_mp3("hoge.mp3")
 play(sound)
-
-player_num = int(input("プレイヤーの人数を入力してください"))
+"""
+#player_num = int(input("プレイヤーの人数を入力してください"))
+player_num = 3
 print(player_num)
 
 boolplayer = []
@@ -29,14 +33,27 @@ cascade = cv2.CascadeClassifier("/home/aj/fd/haarcascade_frontalface_alt2.xml")
 motion_detected_frames = 0
 motion_detected_threshold = 3
 
+shared_state = {"num": 1}
+lock = threading.Lock()
+
 @app.route('/')
 def index():
     return render_template('index.html') #you can customze index.html here
+@app.route('/playersit')
+def playersit():
+    playerbool=""
+    for i in boolplayer:
+        playerbool += str(i)
+        playerbool += "\n"
+    return playerbool
 
 def gen(camera,num):
     frame_count = 0
     consecutive_frame = 4
     while True:
+        with lock:
+            num = shared_state["num"]
+
         if num==0:
             print('基準画像設定')
             background = camera.get_frame()
@@ -108,6 +125,8 @@ def gen(camera,num):
                                 (0, 0, 255),
                                 2
                             )
+                    else:
+                        print("この人でなし!")
                   # draw the bounding boxes
                   #cv2.rectangle(frame_diff, (x, y), (x+w, y+h), (255, 255, 255), 2)
                     cv2.rectangle(orig_frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
@@ -119,11 +138,36 @@ def gen(camera,num):
             ret, jpeg = cv2.imencode(".jpg", orig_frame)
             yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
+def control_loop():
+    while True:
+        sleep_time = random.randint(5, 10)
+        print(f"停止中 {sleep_time}秒")
+        time.sleep(sleep_time)
+
+        print("基準画像設定モードへ")
+        with lock:
+            shared_state["num"] = 0
+
+        # num=0 の処理が終わるまで少し待つ
+        time.sleep(2) # 必要に応じて調整
+
+        active_time = 5
+        print(f"num=1 で稼働開始 {active_time}秒")
+        with lock:
+            shared_state["num"] = 1
+
+        time.sleep(active_time)
         
 @app.route('/video_feed')
 def video_feed():
     return Response(gen(pi_camera,0),mimetype='multipart/x-mixed-replace; boundary=frame')
-
+"""
 if __name__ == '__main__':
 
     app.run(host='0.0.0.0', debug=False)
+"""
+
+if __name__ == "__main__":
+    t = threading.Thread(target=control_loop)
+    t.start()
+    app.run(host="0.0.0.0", port=5000, debug=True)
