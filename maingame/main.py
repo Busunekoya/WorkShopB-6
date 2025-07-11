@@ -5,169 +5,136 @@ import os
 import cv2
 from camera import VideoCamera
 import imutils
-#from pydub import AudioSegment
-#from pydub.playback import play
-import time
+# from pydub import AudioSegment
+# from pydub.playback import play
 import threading
 import random
+import time
+import requests
 
-#音性を流す
-"""
-sound = AudioSegment.from_mp3("hoge.mp3")
-play(sound)
-"""
-#player_num = int(input("プレイヤーの人数を入力してください"))
 player_num = 3
 print(player_num)
 
 boolplayer = []
-
 for i in range(player_num):
     boolplayer.append(0)
 
-# Globals (do not edit)
-pi_camera = VideoCamera() 
+# Globals
+pi_camera = VideoCamera()
 app = Flask(__name__)
 cascade = cv2.CascadeClassifier("/home/aj/fd/haarcascade_frontalface_alt2.xml")
 
+# motion 検出用
 motion_detected_frames = 0
 motion_detected_threshold = 3
+motion_pixel_threshold = 5000   # 動きありと判定する総画素数の閾値
 
 shared_state = {"num": 1}
 lock = threading.Lock()
 
+
 @app.route('/')
 def index():
-    return render_template('index.html') #you can customze index.html here
+    return render_template('index.html')
+
+
 @app.route('/playersit')
 def playersit():
-    playerbool=""
+    playerbool = ""
     for i in boolplayer:
         playerbool += str(i)
         playerbool += "\n"
     return playerbool
 
-def gen(camera,num):
+
+def gen(camera):
     frame_count = 0
     consecutive_frame = 4
-    while True:
-        with lock:
-            num = shared_state["num"]
+    num = 0
 
-        if num==0:
+    # 監視・許可サイクルの設定（秒単位）
+    allow_duration = 5      # 動いても無視する時間
+    monitor_duration = 3    # 動いたら検知する時間
+
+    # 状態管理
+    monitoring = False
+    last_switch_time = time.time()
+
+    while True:
+        # サイクル管理
+        current_time = time.time()
+        elapsed = current_time - last_switch_time
+
+        if monitoring and elapsed > monitor_duration:
+            # 監視時間終了 → 許可時間へ
+            monitoring = False
+            last_switch_time = current_time
+            print("★ 許可時間に切り替え（動いてもOK）")
+
+        elif not monitoring and elapsed > allow_duration:
+            # 許可時間終了 → 監視時間へ
+            monitoring = True
+            last_switch_time = current_time
+            print("★ 監視時間に切り替え（動いたらダメ！）")
+
+        if num == 0:
             print('基準画像設定')
             background = camera.get_frame()
-            # convert the background model to grayscale format
             background = cv2.cvtColor(background, cv2.COLOR_BGR2GRAY)
-        #num=(num+1)%100
-      
+        num = (num + 1) % 100
+
         frame = camera.get_frame()
         frame_count += 1
         orig_frame = frame.copy()
 
-        # IMPORTANT STEP: convert the frame to grayscale first
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         if frame_count % consecutive_frame == 0 or frame_count == 1:
             frame_diff_list = []
-        
-        # find the difference between current frame and base frame
+
         frame_diff = cv2.absdiff(gray, background)
-        # thresholding to convert the frame to binary
         ret, thres = cv2.threshold(frame_diff, 50, 255, cv2.THRESH_BINARY)
-        # dilate the frame a bit to get some more white area...
-        # ... makes the detection of contours a bit easier
         dilate_frame = cv2.dilate(thres, None, iterations=2)
-        # append the final result into the `frame_diff_list`
         frame_diff_list.append(dilate_frame)
-        
-        # if we have reached `consecutive_frame` number of frames
+
         if len(frame_diff_list) == consecutive_frame:
-            # add all the frames in the `frame_diff_list`
             sum_frames = sum(frame_diff_list)
-        
-            # find the contours around the white segmented areas
+
             contours, hierarchy = cv2.findContours(sum_frames, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            # draw the contours, not strictly necessary
-            for i, cnt in enumerate(contours):
-                cv2.drawContours(frame, contours, i, (0, 0, 255), 3)
+
+            motion_detected = False
 
             for contour in contours:
-                # continue through the loop if contour area is less than 1500...
-                # ... helps in removing noise detection
-
-                if cv2.contourArea(contour) >  1500:
-                    motion_detected_frames += 1
-                else:
-                    motion_detected_frames = 0
-
-                if motion_detected_frames >= motion_detected_threshold:
-                  # get the xmin, ymin, width, and height coordinates from the contours
+                if cv2.contourArea(contour) > 1500:
                     (x, y, w, h) = cv2.boundingRect(contour)
-                    # 動体検出領域を切り出す
-                    roi = orig_frame[y:y+h, x:x+w]
+                    cv2.rectangle(orig_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                    motion_detected = True
 
-                    # グレースケールに変換
-                    roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            # ★ 監視時間中に動きを検知したら信号を送る
+            if monitoring and motion_detected:
+                print("！！！動いた！/playersit を呼びます！！！")
 
-                    # 顔検出
-                    faces = cascade.detectMultiScale(roi_gray,scaleFactor=1.1,minNeighbors=3,minSize=(30, 30))
+                # 例：ランダムに誰かを座らせる
+                random_index = random.randint(0, player_num - 1)
+                boolplayer[random_index] = 1
 
-                    if len(faces) > 0:
-                        print("人間を検知！")
-
-                    # ROI内の顔矩形を元の座標系に変換して描画
-                        for (fx, fy, fw, fh) in faces:
-                            # ROI内座標 → 全体座標へ
-                            cv2.rectangle(orig_frame,
-                                (x + fx, y + fy),
-                                (x + fx + fw, y + fy + fh),
-                                (0, 0, 255),
-                                2
-                            )
-                    else:
-                        print("この人でなし!")
-                  # draw the bounding boxes
-                  #cv2.rectangle(frame_diff, (x, y), (x+w, y+h), (255, 255, 255), 2)
-                    cv2.rectangle(orig_frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-        
-            #cv2.imshow('Detected Objects', frame_diff)
-            #cv2.imshow('Detected Objects', sum_frames)
-            #cv2.imshow('orig_frame', orig_frame)
+                try:
+                    res = requests.get("http://127.0.0.1:5000/playersit")
+                    print("playersit のレスポンス:")
+                    print(res.text)
+                except Exception as e:
+                    print("playersit呼び出し失敗:", e)
 
             ret, jpeg = cv2.imencode(".jpg", orig_frame)
             yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
-def control_loop():
-    while True:
-        sleep_time = random.randint(5, 10)
-        print(f"停止中 {sleep_time}秒")
-        time.sleep(sleep_time)
+                   b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n\r\n')
 
-        print("基準画像設定モードへ")
-        with lock:
-            shared_state["num"] = 0
 
-        # num=0 の処理が終わるまで少し待つ
-        time.sleep(2) # 必要に応じて調整
-
-        active_time = 5
-        print(f"num=1 で稼働開始 {active_time}秒")
-        with lock:
-            shared_state["num"] = 1
-
-        time.sleep(active_time)
-        
 @app.route('/video_feed')
 def video_feed():
-    return Response(gen(pi_camera,0),mimetype='multipart/x-mixed-replace; boundary=frame')
-"""
+    return Response(gen(pi_camera),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
 if __name__ == '__main__':
-
-    app.run(host='0.0.0.0', debug=False)
-"""
-
-if __name__ == "__main__":
-    t = threading.Thread(target=control_loop)
-    t.start()
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=False)
